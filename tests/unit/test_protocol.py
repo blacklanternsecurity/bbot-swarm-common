@@ -1,4 +1,4 @@
-"""Tests for common.protocol — wire format serialization and helpers."""
+"""Tests for `swarm_common.protocol` — wire format serialization and helpers."""
 
 from time import time
 
@@ -11,10 +11,10 @@ from swarm_common.protocol import deserialize, make_ack, make_message, serialize
 
 
 class TestMakeMessage:
-    """Tests for the make_message factory function."""
+    """Tests for the `make_message` factory function."""
 
     def test_creates_wire_message_with_uuid(self) -> None:
-        """Verify make_message returns a WireMessage with a UUID msg_id."""
+        """`make_message` returns a `WireMessage` with a UUID `msg_id`."""
         msg = make_message(MessageType.COMMAND, {"cmd": "start_scan"})
         assert isinstance(msg, WireMessage)
         assert msg.type == MessageType.COMMAND
@@ -24,29 +24,29 @@ class TestMakeMessage:
         assert len(msg.msg_id) > 0
 
     def test_unique_msg_ids(self) -> None:
-        """Every call should produce a unique msg_id."""
+        """Every call produces a unique `msg_id`."""
         msg1 = make_message(MessageType.COMMAND, {"a": 1})
         msg2 = make_message(MessageType.COMMAND, {"a": 1})
         assert msg1.msg_id != msg2.msg_id
 
     def test_timestamp_is_recent(self) -> None:
-        """Timestamp should be between before and after the call."""
+        """Timestamp falls between the before/after wall-clock readings."""
         before = time()
         msg = make_message(MessageType.EVENT_BATCH, {})
         after = time()
         assert before <= msg.timestamp <= after
 
     def test_with_reply_to(self) -> None:
-        """Verify reply_to is preserved when provided."""
+        """`reply_to` is preserved when provided."""
         msg = make_message(MessageType.ACK, {}, reply_to="orig-123")
         assert msg.reply_to == "orig-123"
 
 
 class TestMakeAck:
-    """Tests for the make_ack helper."""
+    """Tests for the `make_ack` helper."""
 
     def test_creates_ack_message(self) -> None:
-        """Verify ACK message has correct type and payload."""
+        """ACK message has the correct type and payload."""
         ack = make_ack("target-msg-id")
         assert ack.type == MessageType.ACK
         assert ack.payload == {"ack_id": "target-msg-id"}
@@ -54,16 +54,16 @@ class TestMakeAck:
         assert len(ack.msg_id) > 0
 
     def test_ack_has_no_reply_to(self) -> None:
-        """ACK messages should not have reply_to set."""
+        """ACK messages have `reply_to` unset."""
         ack = make_ack("x")
         assert ack.reply_to is None
 
 
 class TestSerializeDeserialize:
-    """Tests for serialize/deserialize roundtrip and error handling."""
+    """Tests for `serialize` / `deserialize` roundtrip and error handling."""
 
     def test_roundtrip(self) -> None:
-        """Basic serialize -> deserialize should produce an equal message."""
+        """Basic `serialize -> deserialize` produces an equal message."""
         original = make_message(
             MessageType.SCAN_STATUS,
             {"scan_id": "s1", "status": "RUNNING", "status_code": 3},
@@ -74,7 +74,7 @@ class TestSerializeDeserialize:
         assert restored == original
 
     def test_roundtrip_with_nested_payload(self) -> None:
-        """Nested dicts and lists in payload should survive the roundtrip."""
+        """Nested dicts and lists in payload survive the roundtrip."""
         original = make_message(
             MessageType.EVENT_BATCH,
             {
@@ -91,37 +91,37 @@ class TestSerializeDeserialize:
         assert len(restored.payload["events"]) == 2
 
     def test_roundtrip_with_reply_to(self) -> None:
-        """reply_to field should survive the roundtrip."""
+        """`reply_to` field survives the roundtrip."""
         original = make_message(MessageType.ACK, {"ack_id": "abc"}, reply_to="abc")
         data = serialize(original)
         restored = deserialize(data)
         assert restored.reply_to == "abc"
 
     def test_serialize_returns_bytes(self) -> None:
-        """serialize() must return bytes."""
+        """`serialize()` returns bytes."""
         msg = make_message(MessageType.COMMAND, {})
         result = serialize(msg)
         assert isinstance(result, bytes)
 
     def test_deserialize_invalid_bytes_raises(self) -> None:
-        """Invalid JSON bytes should raise orjson.JSONDecodeError."""
+        """Invalid JSON bytes raise `orjson.JSONDecodeError`."""
         with pytest.raises(orjson.JSONDecodeError):
             deserialize(b"not valid json at all {{{")
 
     def test_deserialize_valid_json_but_wrong_schema_raises(self) -> None:
-        """Valid JSON that doesn't match WireMessage schema should raise ValidationError."""
+        """Valid JSON that doesn't match the `WireMessage` schema raises `ValidationError`."""
         with pytest.raises(ValidationError):
             deserialize(b'{"foo": "bar"}')
 
     def test_roundtrip_empty_payload(self) -> None:
-        """Empty payload should roundtrip correctly."""
+        """Empty payload roundtrips correctly."""
         original = make_message(MessageType.STATE_SYNC, {})
         data = serialize(original)
         restored = deserialize(data)
         assert restored.payload == {}
 
     def test_large_payload(self) -> None:
-        """Large payloads (1000 events) should serialize/deserialize correctly."""
+        """Large payloads (1000 events) serialize and deserialize correctly."""
         events = [{"type": "DNS_NAME", "data": f"host-{i}.example.com"} for i in range(1000)]
         original = make_message(MessageType.EVENT_BATCH, {"scan_id": "s1", "events": events})
         data = serialize(original)

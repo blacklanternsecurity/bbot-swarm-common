@@ -88,7 +88,7 @@ wheels = [
 [[package]]
 name = "bbot"
 version = "3.0.0"
-source = { git = "https://github.com/blacklanternsecurity/bbot?rev=7dd31c646c052a7c910dcc48bb7360333b376231#7dd31c646c052a7c910dcc48bb7360333b376231" }
+source = { git = "https://github.com/blacklanternsecurity/bbot?rev=dev#7dd31c646c052a7c910dcc48bb7360333b376231" }
 dependencies = [
     { name = "ansible-core" },
     { name = "ansible-runner" },
@@ -149,7 +149,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "bbot", git = "https://github.com/blacklanternsecurity/bbot?rev=7dd31c646c052a7c910dcc48bb7360333b376231" },
+    { name = "bbot", git = "https://github.com/blacklanternsecurity/bbot?rev=dev" },
     { name = "cryptography", specifier = ">=44" },
     { name = "orjson", specifier = ">=3.11" },
     { name = "pydantic", specifier = ">=2.12" },
