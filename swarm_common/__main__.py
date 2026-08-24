@@ -1,9 +1,4 @@
-"""Generate an Ed25519 keypair for BBOT Swarm.
-
-Usage:
-    python -m swarm_common
-    uv run bbot-swarm-keygen
-"""
+"""Generate and print an Ed25519 keypair for BBOT Swarm."""
 
 from swarm_common.crypto import generate_keypair, serialize_private_key, serialize_public_key
 

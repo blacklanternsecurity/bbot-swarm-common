@@ -1,4 +1,4 @@
-"""Tests for common.models — all Pydantic models, enums, and wire format."""
+"""Tests for `swarm_common.models` — Pydantic models, enums, and wire format."""
 
 from time import time
 
@@ -21,13 +21,9 @@ from swarm_common.models import (
     scan_status_name,
 )
 
-# ---------------------------------------------------------------------------
-# ScanStatus enum
-# ---------------------------------------------------------------------------
-
 
 class TestScanStatus:
-    """Tests for ScanStatus enum and status code conversion helpers."""
+    """Tests for `ScanStatus` enum and status code conversion helpers."""
 
     def test_all_statuses_present(self) -> None:
         expected = {
@@ -48,7 +44,7 @@ class TestScanStatus:
         assert ScanStatus.QUEUED == "QUEUED"
 
     def test_status_codes_monotonically_increase(self) -> None:
-        """Verify ordering matches bbot.constants: QUEUED=0 through ABORTED=8."""
+        """Ordering matches `bbot.constants` (`QUEUED=0` through `ABORTED=8`)."""
         ordered = [
             ScanStatus.QUEUED,
             ScanStatus.NOT_STARTED,
@@ -64,7 +60,7 @@ class TestScanStatus:
         assert codes == sorted(codes)
 
     def test_scan_status_code_roundtrip(self) -> None:
-        """Converting status -> code -> name should roundtrip correctly."""
+        """Converting `status -> code -> name` roundtrips correctly."""
         for status in ScanStatus:
             code = scan_status_code(status)
             assert isinstance(code, int)
@@ -72,13 +68,13 @@ class TestScanStatus:
             assert name == status.value
 
     def test_is_terminal_positive(self) -> None:
-        """FINISHED, FAILED, ABORTED are the terminal states."""
+        """`FINISHED`, `FAILED`, `ABORTED` are the terminal states."""
         assert ScanStatus.FINISHED.is_terminal
         assert ScanStatus.FAILED.is_terminal
         assert ScanStatus.ABORTED.is_terminal
 
     def test_is_terminal_negative(self) -> None:
-        """In-flight states must NOT report as terminal."""
+        """In-flight states do not report as terminal."""
         for status in (
             ScanStatus.QUEUED,
             ScanStatus.NOT_STARTED,
@@ -90,13 +86,8 @@ class TestScanStatus:
             assert not status.is_terminal, f"{status.value} must not be terminal"
 
 
-# ---------------------------------------------------------------------------
-# BeeStatus enum
-# ---------------------------------------------------------------------------
-
-
 class TestBeeStatus:
-    """Tests for BeeStatus enum."""
+    """Tests for `BeeStatus` enum."""
 
     def test_all_statuses_present(self) -> None:
         assert {s.value for s in BeeStatus} == {"ONLINE", "DEGRADED", "OFFLINE"}
@@ -105,26 +96,16 @@ class TestBeeStatus:
         assert isinstance(BeeStatus.ONLINE, str)
 
 
-# ---------------------------------------------------------------------------
-# MessageType enum
-# ---------------------------------------------------------------------------
-
-
 class TestMessageType:
-    """Tests for MessageType enum."""
+    """Tests for `MessageType` enum."""
 
     def test_all_types_present(self) -> None:
         expected = {"command", "cmd_result", "event_batch", "log_batch", "scan_status", "state_sync", "ack"}
         assert {t.value for t in MessageType} == expected
 
 
-# ---------------------------------------------------------------------------
-# WireMessage
-# ---------------------------------------------------------------------------
-
-
 class TestWireMessage:
-    """Tests for the WireMessage envelope model."""
+    """Tests for the `WireMessage` envelope model."""
 
     def test_create_minimal(self) -> None:
         msg = WireMessage(
@@ -153,6 +134,7 @@ class TestWireMessage:
         with pytest.raises(ValidationError):
             WireMessage(
                 msg_id="abc",
+                # intentional invalid value to test rejection
                 type="not_a_real_type",  # type: ignore[arg-type]
                 timestamp=1234567890.0,
                 payload={},
@@ -182,18 +164,13 @@ class TestWireMessage:
         assert restored == msg
 
 
-# ---------------------------------------------------------------------------
-# Command payloads
-# ---------------------------------------------------------------------------
-
-
 class TestStartScanPayload:
-    """Tests for StartScanPayload command model."""
+    """Tests for `StartScanPayload` command model."""
 
     def test_create_full(self) -> None:
         p = StartScanPayload(
             scan_id="scan-001",
-            preset={"target": ["example.com"], "modules": ["httpx"]},
+            preset={"target": ["example.com"], "modules": ["http"]},
             name="My Scan",
         )
         assert p.scan_id == "scan-001"
@@ -206,15 +183,17 @@ class TestStartScanPayload:
 
     def test_missing_scan_id_rejected(self) -> None:
         with pytest.raises(ValidationError):
+            # intentional missing arg to test required-field rejection
             StartScanPayload(preset={})  # type: ignore[call-arg]
 
     def test_missing_preset_rejected(self) -> None:
         with pytest.raises(ValidationError):
+            # intentional missing arg to test required-field rejection
             StartScanPayload(scan_id="s1")  # type: ignore[call-arg]
 
 
 class TestStopScanPayload:
-    """Tests for StopScanPayload command model."""
+    """Tests for `StopScanPayload` command model."""
 
     def test_create(self) -> None:
         p = StopScanPayload(scan_id="scan-001")
@@ -226,13 +205,8 @@ class TestStopScanPayload:
         assert p.force is True
 
 
-# ---------------------------------------------------------------------------
-# Drone -> Hive payloads
-# ---------------------------------------------------------------------------
-
-
 class TestScanStatusPayload:
-    """Tests for ScanStatusPayload report model."""
+    """Tests for `ScanStatusPayload` report model."""
 
     def test_create(self) -> None:
         p = ScanStatusPayload(
@@ -258,13 +232,14 @@ class TestScanStatusPayload:
         with pytest.raises(ValidationError):
             ScanStatusPayload(
                 scan_id="s1",
+                # intentional invalid value to test rejection
                 status="INVALID",  # type: ignore[arg-type]
                 status_code=99,
             )
 
 
 class TestEventBatchPayload:
-    """Tests for EventBatchPayload report model."""
+    """Tests for `EventBatchPayload` report model."""
 
     def test_create(self) -> None:
         events = [{"type": "DNS_NAME", "data": "example.com"}, {"type": "IP_ADDRESS", "data": "1.2.3.4"}]
@@ -278,7 +253,7 @@ class TestEventBatchPayload:
 
 
 class TestLogBatchPayload:
-    """Tests for LogBatchPayload report model."""
+    """Tests for `LogBatchPayload` report model."""
 
     def test_create(self) -> None:
         p = LogBatchPayload(scan_id="s1", lines=["line1", "line2"])
@@ -290,7 +265,7 @@ class TestLogBatchPayload:
 
 
 class TestScanInfo:
-    """Tests for ScanInfo summary model used in state_sync."""
+    """Tests for `ScanInfo` summary model used in `state_sync`."""
 
     def test_create_minimal(self) -> None:
         info = ScanInfo(scan_id="s1", status=ScanStatus.RUNNING)
@@ -310,7 +285,7 @@ class TestScanInfo:
 
 
 class TestStateSyncPayload:
-    """Tests for StateSyncPayload — full drone state on connect/reconnect."""
+    """Tests for `StateSyncPayload` — full drone state on connect/reconnect."""
 
     def test_create(self) -> None:
         payload = StateSyncPayload(

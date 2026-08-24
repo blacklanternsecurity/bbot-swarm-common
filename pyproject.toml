@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-bbot = { git = "https://github.com/blacklanternsecurity/bbot", rev = "7dd31c646c052a7c910dcc48bb7360333b376231" }
+bbot = { git = "https://github.com/blacklanternsecurity/bbot", tag = "v3.0.2" }
 
 [tool.ruff]
 line-length = 119
@@ -38,6 +38,14 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "ANN", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = "bbot.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

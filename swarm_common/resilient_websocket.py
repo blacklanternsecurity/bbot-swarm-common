@@ -1,17 +1,4 @@
-"""ResilientWebSocket — client-mode WebSocket with reconnection and heartbeat.
-
-Provides a unified resilience layer for any outbound WebSocket connection:
-- Connect with auth headers + optional SSL
-- Event-driven disconnect detection (Event, not polling)
-- Configurable app-level heartbeat (optional — off by default)
-- Exponential backoff with jitter for reconnection
-- Lifecycle callbacks (on_connect, on_disconnect)
-- send_raw / recv_raw satisfying the RawTransport protocol from channel.py
-- Graceful shutdown
-
-Used by bbot_bee.connection.ConnectionManager (bee→hive, with AppLevelHeartbeat)
-and bbot_hive.adapters.enterprise.EnterpriseAdapter (hive→backend, heartbeat=None).
-"""
+"""Client-mode WebSocket transport with reconnection, optional heartbeat, and backoff."""
 
 from __future__ import annotations
 
@@ -40,11 +27,7 @@ class ConnectionState(StrEnum):
 
 
 class HeartbeatStrategy(Protocol):
-    """Protocol for pluggable heartbeat strategies.
-
-    Implementations define how application-level keepalive works. The default
-    (no heartbeat) relies on the websockets library's protocol-level ping/pong.
-    """
+    """Pluggable heartbeat strategy — falls back to library-level ping/pong when omitted."""
 
     def on_connected(self) -> None:
         """Reset internal state when a new connection is established."""
@@ -58,31 +41,18 @@ class HeartbeatStrategy(Protocol):
         """Run the heartbeat loop until the connection is lost.
 
         Args:
-            send: Callable to send raw bytes over the WebSocket.
-            mark_dead: Callable to mark the connection as dead (fires disconnect).
+            send: Callable that sends raw bytes over the WebSocket.
+            mark_dead: Callable that marks the connection as dead.
         """
         ...
 
     def intercept_recv(self, data: bytes) -> bool:
-        """Return True if data is a heartbeat response (consumed internally).
-
-        Args:
-            data: Raw bytes received from the WebSocket.
-
-        Returns:
-            True if the data was a heartbeat response and should not be
-            returned to the caller.
-        """
+        """Return `True` if `data` is a heartbeat response and should be consumed."""
         ...
 
 
 class AppLevelHeartbeat:
-    """Heartbeat via custom application-level ping/pong payloads.
-
-    For servers that understand and respond to custom ping bytes (e.g. the
-    hive's bee_ws.py responds to b"bee-ping" with b"hive-pong"). Not suitable
-    for servers that don't handle custom payloads (e.g. bbot-enterprise backend).
-    """
+    """Heartbeat over custom ping/pong payloads — requires the peer to respond to the configured bytes."""
 
     def __init__(
         self,
@@ -112,7 +82,7 @@ class AppLevelHeartbeat:
         send: Callable[[bytes], Awaitable[None]],
         mark_dead: Callable[[], Awaitable[None]],
     ) -> None:
-        """Send pings at interval, detect missed pongs via timeout."""
+        """Send pings at the configured interval and call `mark_dead` if no pong arrives in time."""
         interval = self._interval_s
         timeout = self._timeout_s
         log.info(f"AppLevelHeartbeat.run: starting ({interval=:.1f}s, {timeout=:.1f}s)")
@@ -120,11 +90,7 @@ class AppLevelHeartbeat:
         while True:
             await sleep(interval)
             elapsed = monotonic() - self._last_pong_time
-            log.log(
-                5,
-                f"AppLevelHeartbeat.run: tick — {elapsed=:.2f}s since last pong, "
-                f"{timeout=:.1f}s threshold",
-            )
+            log.log(5, f"AppLevelHeartbeat.run: tick — {elapsed=:.2f}s since last pong, {timeout=:.1f}s threshold")
             log.debug(f"AppLevelHeartbeat.run: {elapsed=:.1f}s since last pong")
 
             if elapsed > timeout:
@@ -143,7 +109,7 @@ class AppLevelHeartbeat:
         log.info("AppLevelHeartbeat.run: heartbeat loop exited")
 
     def intercept_recv(self, data: bytes) -> bool:
-        """Intercept pong payloads — reset timer and consume the message."""
+        """Reset the pong timer and consume the message when `data` matches the configured pong payload."""
         if data == self._pong_payload:
             prev = self._last_pong_time
             self._last_pong_time = monotonic()
@@ -158,15 +124,7 @@ class AppLevelHeartbeat:
 
 
 class ResilientWebSocket:
-    """Client-mode WebSocket with event-driven disconnect detection.
-
-    Provides connect/disconnect lifecycle, send_raw/recv_raw (satisfying
-    the RawTransport protocol from channel.py), optional app-level heartbeat,
-    and exponential backoff calculation for reconnection.
-
-    Does NOT contain its own reconnect loop — callers compose their own loop
-    using connect(), disconnect(), calc_backoff(), and disconnected_event.
-    """
+    """Client-mode WebSocket that exposes lifecycle primitives — callers compose their own reconnect loop."""
 
     def __init__(
         self,
@@ -199,8 +157,6 @@ class ResilientWebSocket:
             f"{backoff_base_s=:.1f}s, {backoff_max_s=:.1f}s, {backoff_jitter_factor=}"
         )
 
-    # --- Properties -----------------------------------------------------------
-
     @property
     def url(self) -> str:
         """The WebSocket URL."""
@@ -213,12 +169,12 @@ class ResilientWebSocket:
 
     @property
     def is_connected(self) -> bool:
-        """Whether the connection is currently active."""
+        """`True` while the connection is in the `CONNECTED` state."""
         return self._state == ConnectionState.CONNECTED
 
     @property
     def disconnected_event(self) -> Event:
-        """Event set when the connection is lost. Callers can await this."""
+        """`Event` set when the connection is lost; callers can await this."""
         return self._disconnected_event
 
     @property
@@ -228,7 +184,6 @@ class ResilientWebSocket:
 
     @on_connect.setter
     def on_connect(self, callback: Callable[[], Awaitable[None]] | None) -> None:
-        """Set the on_connect callback."""
         self._on_connect = callback
 
     @property
@@ -238,21 +193,15 @@ class ResilientWebSocket:
 
     @on_disconnect.setter
     def on_disconnect(self, callback: Callable[[], Awaitable[None]] | None) -> None:
-        """Set the on_disconnect callback."""
         self._on_disconnect = callback
 
-    # --- Connect / Disconnect -------------------------------------------------
-
     async def connect(self) -> None:
-        """Attempt a single WebSocket connection.
-
-        Fires the on_connect callback on success. Resets the heartbeat
-        strategy if one is configured.
+        """Attempt a single WebSocket connection; fires `on_connect` and resets the heartbeat on success.
 
         Raises:
             ConnectionError: If the connection cannot be established.
         """
-        log.info(f"connect: connecting to {self._url}")
+        log.info(f"connecting to {self._url}")
         self._state = ConnectionState.CONNECTING
 
         try:
@@ -263,10 +212,7 @@ class ResilientWebSocket:
                 kwargs["ssl"] = self._ssl_context
             kwargs.update(self._connect_kwargs)
 
-            log.log(
-                5,
-                f"connect: connect kwargs={{{', '.join(f'{k}=...' for k in kwargs)}}}",
-            )
+            log.log(5, f"connect kwargs={{{', '.join(f'{k}=...' for k in kwargs)}}}")
 
             ws = await websockets_connect(self._url, **kwargs)
             self._ws = ws
@@ -276,28 +222,24 @@ class ResilientWebSocket:
             if self._heartbeat is not None:
                 self._heartbeat.on_connected()
 
-            log.info(f"connect: connected to {self._url}")
+            log.info(f"connected to {self._url}")
 
             if self._on_connect is not None:
-                log.debug("connect: firing on_connect callback")
+                log.debug("firing on_connect callback")
                 await self._on_connect()
 
         except Exception as exc:
-            log.warning(f"connect: failed — {type(exc).__name__}: {exc}")
+            log.warning(f"failed — {type(exc).__name__}: {exc}")
             self._state = ConnectionState.DISCONNECTED
             raise ConnectionError(f"Connect failed: {exc}") from exc
 
     async def disconnect(self) -> None:
-        """Gracefully close the connection.
-
-        Idempotent — safe to call when already disconnected. Fires the
-        on_disconnect callback if transitioning from a connected state.
-        """
+        """Gracefully close the connection; idempotent, and fires `on_disconnect` on real transition."""
         if self._state == ConnectionState.DISCONNECTED:
-            log.debug("disconnect: already DISCONNECTED, skipping")
+            log.debug("already DISCONNECTED, skipping")
             return
 
-        log.info("disconnect: closing connection")
+        log.info("closing connection")
         prev = self._state.value
         self._state = ConnectionState.DISCONNECTED
         self._disconnected_event.set()
@@ -307,14 +249,12 @@ class ResilientWebSocket:
                 await self._ws.close()
             self._ws = None
 
-        log.debug(f"disconnect: {prev} -> DISCONNECTED")
+        log.debug(f"{prev} -> DISCONNECTED")
 
         if self._on_disconnect is not None:
-            log.debug("disconnect: firing on_disconnect callback")
+            log.debug("firing on_disconnect callback")
             with suppress(Exception):
                 await self._on_disconnect()
-
-    # --- Send / Recv ----------------------------------------------------------
 
     async def send_raw(self, data: bytes) -> None:
         """Send raw bytes over the WebSocket.
@@ -323,82 +263,70 @@ class ResilientWebSocket:
             ConnectionError: If not connected or the send fails.
         """
         if not self.is_connected or self._ws is None:
-            log.debug("send_raw: not connected, raising ConnectionError")
+            log.debug("not connected, raising ConnectionError")
             raise ConnectionError("Cannot send: not connected")
 
         size = len(data)
-        log.log(5, f"send_raw: {size=}, first_50_hex={data[:50].hex()}")
-        log.debug(f"send_raw: sending {size=} bytes")
+        log.log(5, f"{size=}, first_50_hex={data[:50].hex()}")
+        log.debug(f"sending {size=} bytes")
 
         try:
             await self._ws.send(data)
-            log.log(5, f"send_raw: sent {size=} bytes successfully")
-            log.debug(f"send_raw: sent {size=} bytes")
+            log.log(5, f"sent {size=} bytes successfully")
+            log.debug(f"sent {size=} bytes")
         except Exception as exc:
-            log.warning(f"send_raw: failed — {type(exc).__name__}: {exc}")
+            log.warning(f"failed — {type(exc).__name__}: {exc}")
             await self._mark_disconnected()
             raise ConnectionError(f"Send failed: {exc}") from exc
 
     async def recv_raw(self) -> bytes:
-        """Receive raw bytes from the WebSocket.
-
-        If a heartbeat strategy is configured, pong payloads are intercepted
-        and not returned to the caller.
+        """Receive raw bytes from the WebSocket; pong payloads are intercepted by the heartbeat strategy.
 
         Raises:
             ConnectionError: If not connected or the receive fails.
         """
         if not self.is_connected or self._ws is None:
-            log.debug("recv_raw: not connected, raising ConnectionError")
+            log.debug("not connected, raising ConnectionError")
             raise ConnectionError("Cannot receive: not connected")
 
-        log.debug("recv_raw: waiting for data...")
+        log.debug("waiting for data...")
 
         try:
             while True:
                 raw = await self._ws.recv()
                 data = raw.encode("utf-8") if isinstance(raw, str) else bytes(raw)
 
-                # Let the heartbeat strategy intercept pong payloads
                 if self._heartbeat is not None and self._heartbeat.intercept_recv(data):
-                    log.log(5, f"recv_raw: heartbeat intercepted {len(data)} bytes")
+                    log.log(5, f"heartbeat intercepted {len(data)} bytes")
                     continue
 
                 size = len(data)
-                log.log(5, f"recv_raw: {size=}, first_50_hex={data[:50].hex()}")
-                log.debug(f"recv_raw: received {size=} bytes")
+                log.log(5, f"{size=}, first_50_hex={data[:50].hex()}")
+                log.debug(f"received {size=} bytes")
                 return data
 
         except Exception as exc:
-            log.warning(f"recv_raw: failed — {type(exc).__name__}: {exc}")
+            log.warning(f"failed — {type(exc).__name__}: {exc}")
             await self._mark_disconnected()
             raise ConnectionError(f"Receive failed: {exc}") from exc
 
-    # --- Heartbeat ------------------------------------------------------------
-
     async def run_heartbeat(self) -> None:
-        """Run the heartbeat strategy loop.
-
-        No-op if no heartbeat strategy is configured. Blocks until the
-        connection is lost or the heartbeat detects a timeout.
-        """
+        """Block on the heartbeat strategy loop until disconnect or timeout; no-op when no strategy is set."""
         if self._heartbeat is None:
-            log.debug("run_heartbeat: no heartbeat strategy configured, no-op")
+            log.debug("no heartbeat strategy configured, no-op")
             return
 
-        log.debug("run_heartbeat: delegating to heartbeat strategy")
+        log.debug("delegating to heartbeat strategy")
         await self._heartbeat.run(
             send=self.send_raw,
             mark_dead=self._mark_disconnected,
         )
 
-    # --- Backoff --------------------------------------------------------------
-
     def calc_backoff(self, attempt: int) -> float:
-        """Calculate reconnection delay with exponential backoff + jitter.
+        """Calculate the reconnection delay using exponential backoff with jitter.
 
         Args:
-            attempt: The zero-indexed reconnection attempt number.
+            attempt: Zero-indexed reconnection attempt number.
 
         Returns:
             Delay in seconds before the next reconnection attempt.
@@ -408,25 +336,19 @@ class ResilientWebSocket:
         delay = float(base_delay + jitter_amount)
         log.log(
             5,
-            f"calc_backoff: {attempt=}, base_s={self._backoff_base_s}, max_s={self._backoff_max_s}, "
+            f"{attempt=}, base_s={self._backoff_base_s}, max_s={self._backoff_max_s}, "
             f"{base_delay=:.3f}s, jitter={jitter_amount:.3f}s, {delay=:.3f}s",
         )
-        log.debug(f"calc_backoff: {attempt=}, {base_delay=:.2f}s, jitter={jitter_amount:.2f}s, {delay=:.2f}s")
+        log.debug(f"{attempt=}, {base_delay=:.2f}s, jitter={jitter_amount:.2f}s, {delay=:.2f}s")
         return delay
 
-    # --- Internal -------------------------------------------------------------
-
     async def _mark_disconnected(self) -> None:
-        """Transition to DISCONNECTED and fire the callback (once).
-
-        Safe to call multiple times — only the first call has an effect.
-        Sets the disconnected_event so callers awaiting it are woken.
-        """
+        """Transition to `DISCONNECTED`, set the event, and fire `on_disconnect` exactly once."""
         if self._state == ConnectionState.DISCONNECTED:
             return
 
         prev = self._state.value
-        log.info(f"_mark_disconnected: {prev} -> DISCONNECTED")
+        log.info(f"{prev} -> DISCONNECTED")
         self._state = ConnectionState.DISCONNECTED
         self._disconnected_event.set()
 

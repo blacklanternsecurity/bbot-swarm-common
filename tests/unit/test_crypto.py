@@ -1,13 +1,8 @@
-"""Tests for common.crypto — Ed25519 wrapper implementation.
-
-Tests OUR wrapper's behavior: input validation, exception wrapping,
-serialization round-trips, and error path coverage. Does NOT test the
-underlying cryptography library's Ed25519 correctness — that's their
-test suite's job.
-"""
+"""Tests for swarm_common.crypto — Ed25519 wrapper behavior."""
 
 from __future__ import annotations
 
+from base64 import b64encode
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -25,10 +20,6 @@ from swarm_common.crypto import (
     verify,
 )
 
-# ---------------------------------------------------------------------------
-# Key generation — wrapper returns correct types and structure
-# ---------------------------------------------------------------------------
-
 
 class TestGenerateKeypair:
     """Tests for generate_keypair wrapper."""
@@ -44,6 +35,7 @@ class TestGenerateKeypair:
         """KeyPair should be immutable — assignment must raise."""
         kp = generate_keypair()
         with pytest.raises(FrozenInstanceError):
+            # intentional frozen-field assignment to test immutability
             kp.private_key = None  # type: ignore[misc]
 
     def test_each_call_produces_unique_keys(self) -> None:
@@ -64,40 +56,35 @@ class TestGenerateKeypair:
         assert derived_pub == original_pub
 
 
-# ---------------------------------------------------------------------------
-# Input validation — wrapper rejects bad types before hitting FFI
-# ---------------------------------------------------------------------------
-
-
 class TestInputValidation:
-    """Tests for type validation in sign/verify/deserialize.
-
-    Our wrapper must reject bad types with CryptoError BEFORE they reach
-    the cryptography library's FFI boundary.
-    """
+    """Type validation in sign/verify/deserialize — wrapper rejects bad types before FFI."""
 
     def test_sign_rejects_str(self) -> None:
         """sign() must reject str data."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="must be bytes"):
+            # intentional wrong type to test rejection
             sign(kp.private_key, "string data")  # type: ignore[arg-type]
 
     def test_sign_rejects_int(self) -> None:
         """sign() must reject int data."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="must be bytes"):
+            # intentional wrong type to test rejection
             sign(kp.private_key, 42)  # type: ignore[arg-type]
 
     def test_sign_rejects_none(self) -> None:
         """sign() must reject None data."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="must be bytes"):
+            # intentional wrong type to test rejection
             sign(kp.private_key, None)  # type: ignore[arg-type]
 
     def test_sign_rejects_bytearray(self) -> None:
         """sign() must reject bytearray (not concurrency-safe at FFI boundary)."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="must be bytes"):
+            # intentional wrong type to test rejection
             sign(kp.private_key, bytearray(b"hello"))  # type: ignore[arg-type]
 
     def test_verify_rejects_str_data(self) -> None:
@@ -105,12 +92,14 @@ class TestInputValidation:
         kp = generate_keypair()
         sig = sign(kp.private_key, b"hello")
         with pytest.raises(CryptoError, match="data must be bytes"):
+            # intentional wrong type to test rejection
             verify(kp.public_key, "string", sig)  # type: ignore[arg-type]
 
     def test_verify_rejects_str_signature(self) -> None:
         """verify() must reject str signature."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="signature must be bytes"):
+            # intentional wrong type to test rejection
             verify(kp.public_key, b"hello", "not bytes")  # type: ignore[arg-type]
 
     def test_verify_rejects_bytearray_data(self) -> None:
@@ -118,32 +107,38 @@ class TestInputValidation:
         kp = generate_keypair()
         sig = sign(kp.private_key, b"hello")
         with pytest.raises(CryptoError, match="data must be bytes"):
+            # intentional wrong type to test rejection
             verify(kp.public_key, bytearray(b"hello"), sig)  # type: ignore[arg-type]
 
     def test_verify_rejects_bytearray_signature(self) -> None:
         """verify() must reject bytearray signature."""
         kp = generate_keypair()
         with pytest.raises(CryptoError, match="signature must be bytes"):
+            # intentional wrong type to test rejection
             verify(kp.public_key, b"hello", bytearray(b"\x00" * 64))  # type: ignore[arg-type]
 
     def test_deserialize_public_key_rejects_bytes(self) -> None:
         """deserialize_public_key must reject bytes (expects str)."""
         with pytest.raises(CryptoError, match="must be str"):
+            # intentional wrong type to test rejection
             deserialize_public_key(b"\x00" * 32)  # type: ignore[arg-type]
 
     def test_deserialize_private_key_rejects_bytes(self) -> None:
         """deserialize_private_key must reject bytes (expects str)."""
         with pytest.raises(CryptoError, match="must be str"):
+            # intentional wrong type to test rejection
             deserialize_private_key(b"\x00" * 32)  # type: ignore[arg-type]
 
     def test_deserialize_public_key_rejects_int(self) -> None:
         """deserialize_public_key must reject int."""
         with pytest.raises(CryptoError, match="must be str"):
+            # intentional wrong type to test rejection
             deserialize_public_key(42)  # type: ignore[arg-type]
 
     def test_deserialize_private_key_rejects_int(self) -> None:
         """deserialize_private_key must reject int."""
         with pytest.raises(CryptoError, match="must be str"):
+            # intentional wrong type to test rejection
             deserialize_private_key(42)  # type: ignore[arg-type]
 
     def test_deserialize_public_key_rejects_invalid_base64(self) -> None:
@@ -157,17 +152,8 @@ class TestInputValidation:
             deserialize_private_key("not!valid!base64!!!")
 
 
-# ---------------------------------------------------------------------------
-# Exception wrapping — library exceptions must never leak
-# ---------------------------------------------------------------------------
-
-
 class TestExceptionWrapping:
-    """Tests that cryptography library exceptions are always wrapped.
-
-    Callers should only ever see CryptoError or InvalidSignatureError,
-    never cryptography.exceptions.InvalidSignature or ValueError directly.
-    """
+    """Library exceptions must be wrapped — callers only see CryptoError or InvalidSignatureError."""
 
     def test_invalid_signature_wraps_to_our_exception(self) -> None:
         """Wrong signature must raise InvalidSignatureError, not cryptography's InvalidSignature."""
@@ -185,8 +171,6 @@ class TestExceptionWrapping:
 
     def test_wrong_key_length_wraps_to_crypto_error(self) -> None:
         """Wrong-length key data must raise CryptoError, not ValueError."""
-        from base64 import b64encode
-
         for length in (0, 1, 16, 31, 33, 64):
             bad_b64 = b64encode(b"\x00" * length).decode()
             with pytest.raises(CryptoError):
@@ -197,7 +181,6 @@ class TestExceptionWrapping:
     def test_invalid_signature_is_subclass_of_crypto_error(self) -> None:
         """InvalidSignatureError must be catchable as CryptoError."""
         assert issubclass(InvalidSignatureError, CryptoError)
-        # Also verify in practice — catching CryptoError catches InvalidSignatureError
         kp = generate_keypair()
         with pytest.raises(CryptoError):
             verify(kp.public_key, b"hello", b"\x00" * 64)
@@ -207,11 +190,6 @@ class TestExceptionWrapping:
         assert issubclass(CryptoError, Exception)
         assert not issubclass(CryptoError, BaseException.__subclasses__()[0]
                               if BaseException.__subclasses__() else type)
-
-
-# ---------------------------------------------------------------------------
-# Serialization round-trips — our serialize/deserialize pair works correctly
-# ---------------------------------------------------------------------------
 
 
 class TestSerializationRoundTrip:
@@ -269,11 +247,6 @@ class TestSerializationRoundTrip:
         restored_priv = deserialize_private_key(raw_priv1)
         raw_priv2 = serialize_private_key(restored_priv)
         assert raw_priv1 == raw_priv2
-
-
-# ---------------------------------------------------------------------------
-# Edge cases — boundary conditions our wrapper must handle
-# ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:

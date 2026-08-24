@@ -1,8 +1,4 @@
-"""Pydantic models, enums, and wire format for the BBOT Swarm protocol.
-
-Shared between bbot-hive and bbot-drone. Scan status codes come
-directly from bbot.constants.
-"""
+"""Pydantic models, enums, and wire format for the BBOT Swarm protocol."""
 
 from __future__ import annotations
 
@@ -31,7 +27,7 @@ class ScanStatus(StrEnum):
 
     @property
     def is_terminal(self) -> bool:
-        """True iff the scan has reached FINISHED / FAILED / ABORTED."""
+        """`True` iff the scan has reached `FINISHED`, `FAILED`, or `ABORTED`."""
         return self in _TERMINAL_SCAN_STATUSES
 
 
@@ -61,21 +57,16 @@ class MessageType(StrEnum):
 
 
 def scan_status_code(status: ScanStatus | str) -> int:
-    """Convert a ScanStatus to its integer code via bbot.constants."""
-    log.debug(f"scan_status_code: {status=}")
+    """Convert a `ScanStatus` to its integer code via `bbot.constants`."""
+    log.debug(f"{status=}")
     value = status.value if isinstance(status, ScanStatus) else status
     return int(get_scan_status_code(value))
 
 
 def scan_status_name(code: int) -> str:
-    """Convert an integer status code to its string name via bbot.constants."""
-    log.debug(f"scan_status_name: {code=}")
+    """Convert an integer status code to its string name via `bbot.constants`."""
+    log.debug(f"{code=}")
     return str(get_scan_status_name(code))
-
-
-# ---------------------------------------------------------------------------
-# Wire message envelope
-# ---------------------------------------------------------------------------
 
 
 class WireMessage(BaseModel):
@@ -88,13 +79,8 @@ class WireMessage(BaseModel):
     reply_to: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Command payloads (Hive -> Drone)
-# ---------------------------------------------------------------------------
-
-
 class StartScanPayload(BaseModel):
-    """Payload for start_scan commands."""
+    """Payload for `start_scan` commands."""
 
     scan_id: str
     preset: dict[str, Any]
@@ -102,15 +88,10 @@ class StartScanPayload(BaseModel):
 
 
 class StopScanPayload(BaseModel):
-    """Payload for stop_scan commands."""
+    """Payload for `stop_scan` commands."""
 
     scan_id: str
     force: bool = False
-
-
-# ---------------------------------------------------------------------------
-# Report payloads (Drone -> Hive)
-# ---------------------------------------------------------------------------
 
 
 class ScanStatusPayload(BaseModel):
@@ -152,3 +133,6 @@ class StateSyncPayload(BaseModel):
     status: BeeStatus
     active_scans: dict[str, ScanInfo]
     capacity: dict[str, int]
+    # Per-process nonce; a change tells the hive the queen restarted (scans lost)
+    # rather than merely reconnected. None from a pre-upgrade bee.
+    boot_id: str | None = None
