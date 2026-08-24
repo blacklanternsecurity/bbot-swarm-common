@@ -30,7 +30,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-bbot = { git = "https://github.com/blacklanternsecurity/bbot", rev = "dev" }
+bbot = { git = "https://github.com/blacklanternsecurity/bbot", tag = "v3.0.2" }
 
 [tool.ruff]
 line-length = 119
